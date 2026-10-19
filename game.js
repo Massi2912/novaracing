@@ -2307,7 +2307,7 @@ function buildCarModel(rdr, rig) {
     [-0.19, 0.44, -0.10], [-0.215, 0.55, 0.00], [-0.19, 0.63, 0.18], [-0.08, 0.675, 0.34], [0, 0.69, 0.40],
     [0.08, 0.675, 0.34], [0.19, 0.63, 0.18], [0.215, 0.55, 0.00], [0.19, 0.44, -0.10]
   ].map(p => new THREE.Vector3(p[0], p[1], p[2])));
-  const hmHalo = add(new THREE.TubeGeometry(haloCurve, 40, 0.016, 6, false), haloMat, 0, 0, 0, true);
+  add(new THREE.TubeGeometry(haloCurve, 40, 0.016, 6, false), haloMat, 0, 0, 0, true);
   const hmStrut = strut(0.018, [0, 0.69, 0.40], [0, 0.38, 0.56], haloMat);
   [-1, 1].forEach(sx => {
     add(box(0.15, 0.022, 0.03), carbon, sx * 0.29, 0.47, 0.30);                       // Spiegelarm
@@ -2416,7 +2416,7 @@ function buildCarModel(rdr, rig) {
   car.scale.setScalar(1.3);
   buildCarExtras(car, rig);
   rig.env = env;
-  rig.cockpitHide = [hmHelmet, hmVisor, hmStripe, hmStrut, hmHalo];     // im Cockpit-Blick ausgeblendet
+  rig.cockpitHide = [hmHelmet, hmVisor, hmStripe, hmStrut];     // im Cockpit-Blick ausgeblendet
   return car;
 }
 
@@ -3526,6 +3526,21 @@ function swayShader(sh) {
     '#ifdef USE_INSTANCING\n' +
     'float ph = instanceMatrix[3].x * 0.21 + instanceMatrix[3].z * 0.17;\n' +
     'float hh = max(0.0, instanceMatrix[3].y + 0.5 + position.y);\n' +
+    'float sw = (sin(uTime * 1.6 + ph) + 0.5 * sin(uTime * 2.9 + ph * 1.7)) * 0.018 * hh * uAmp * uWind;\n' +
+    'transformed.x += sw;\ntransformed.z += sw * 0.6;\n' +
+    '#endif');
+}
+
+// Wie swayShader, aber für Höhengelände (Bergpass): die Schwankung hängt an der Höhe ÜBER DEM BODEN (lokale Geometrie-Höhe
+// + uBase = Höhe des Instanz-Mittelpunkts über dem Boden, jeweils in Instanz-Einheiten), nicht an der Welt-Höhe.
+// Sonst wackeln Bäume in 40–60 m Höhe um mehrere Meter.
+function swayShaderLocal(sh, base) {
+  sh.uniforms.uTime = crowdUni.time; sh.uniforms.uAmp = crowdUni.amp; sh.uniforms.uWind = windUni; sh.uniforms.uBase = { value: base };
+  sh.vertexShader = 'uniform float uTime;\nuniform float uAmp;\nuniform float uWind;\nuniform float uBase;\n' + sh.vertexShader.replace('#include <begin_vertex>',
+    '#include <begin_vertex>\n' +
+    '#ifdef USE_INSTANCING\n' +
+    'float ph = instanceMatrix[3].x * 0.21 + instanceMatrix[3].z * 0.17;\n' +
+    'float hh = max(0.0, (position.y + uBase) * length(instanceMatrix[1].xyz));\n' +
     'float sw = (sin(uTime * 1.6 + ph) + 0.5 * sin(uTime * 2.9 + ph * 1.7)) * 0.018 * hh * uAmp * uWind;\n' +
     'transformed.x += sw;\ntransformed.z += sw * 0.6;\n' +
     '#endif');
@@ -5544,7 +5559,7 @@ function createAlpineCloudSea() {
 }
 function createAlpineFlora() {
   const V3 = (x, y, z) => new THREE.Vector3(x, y, z), Yax = V3(0, 1, 0), yawQ = a => new THREE.Quaternion().setFromAxisAngle(Yax, a);
-  const swayMat = c => { const m = new THREE.MeshLambertMaterial({ color: c }); m.onBeforeCompile = swayShader; return m; };
+  const swayMat = (c, base) => { const m = new THREE.MeshLambertMaterial({ color: c }); m.onBeforeCompile = sh => swayShaderLocal(sh, base); return m; };
   const hsl = (h, s, l) => new THREE.Color().setHSL(h, s, l);
   // Kiefern/Fichten: nur in tieferen Lagen, verschwinden mit der Höhe
   const pines = alpineSpots(901, SCENE.ALP_PINES, { dMin: 20, dMax: 400, hMin: -2, hMax: 62, sMin: 0, sMax: 0.85, clear: 7, tries: 60000, keep: (x, z, h, r) => r < 1 - smooth01(30, 52, h) });
@@ -5554,13 +5569,13 @@ function createAlpineFlora() {
     trunk.push({ p: V3(p.x, y + 1.1 * s, p.z), q, s: V3(s, s, s) });
     c1.push({ p: V3(p.x, y + 3.2 * s, p.z), q, s: V3(s, s, s), c: col }); c2.push({ p: V3(p.x, y + 5.0 * s, p.z), q, s: V3(s * 0.8, s, s * 0.8), c: col }); c3.push({ p: V3(p.x, y + 6.6 * s, p.z), q, s: V3(s * 0.55, s, s * 0.55), c: col });
   });
-  makeInstanced(new THREE.CylinderGeometry(0.22, 0.34, 2.4, 5), swayMat(0x4a3322), trunk);
-  makeInstanced(new THREE.ConeGeometry(2.3, 3.6, 7), swayMat(0xffffff), c1);
-  makeInstanced(new THREE.ConeGeometry(1.9, 3.2, 7), swayMat(0xffffff), c2);
-  makeInstanced(new THREE.ConeGeometry(1.4, 3.0, 7), swayMat(0xffffff), c3);
+  makeInstanced(new THREE.CylinderGeometry(0.22, 0.34, 2.4, 5), swayMat(0x4a3322, 1.1), trunk);
+  makeInstanced(new THREE.ConeGeometry(2.3, 3.6, 7), swayMat(0xffffff, 3.2), c1);
+  makeInstanced(new THREE.ConeGeometry(1.9, 3.2, 7), swayMat(0xffffff, 5.0), c2);
+  makeInstanced(new THREE.ConeGeometry(1.4, 3.0, 7), swayMat(0xffffff, 6.6), c3);
   // Latschenkiefern: flache dunkle Büsche bis in grosse Höhe
   const bushes = alpineSpots(902, SCENE.ALP_BUSHES, { dMin: 14, dMax: 400, hMin: 0, hMax: 70, sMin: 0, sMax: 0.9, clear: 3, tries: 40000, keep: (x, z, h, r) => r < 1 - smooth01(48, 70, h) });
-  makeInstanced(new THREE.IcosahedronGeometry(1, 0), swayMat(0xffffff), bushes.map(p => ({ p: V3(p.x, p.h + 0.2, p.z), q: yawQ(p.a * 6.28), s: V3(1.3 + p.b * 1.4, 0.7 + p.c * 0.5, 1.3 + p.d * 1.2), c: hsl(0.3 + p.c * 0.05, 0.35, 0.13 + p.d * 0.07) })));
+  makeInstanced(new THREE.IcosahedronGeometry(1, 0), swayMat(0xffffff, 0.2), bushes.map(p => ({ p: V3(p.x, p.h + 0.2, p.z), q: yawQ(p.a * 6.28), s: V3(1.3 + p.b * 1.4, 0.7 + p.c * 0.5, 1.3 + p.d * 1.2), c: hsl(0.3 + p.c * 0.05, 0.35, 0.13 + p.d * 0.07) })));
   // Felsbrocken und Felsnadeln
   const rocks = alpineSpots(903, SCENE.ALP_ROCKS, { dMin: 12, dMax: 400, hMin: 0, hMax: 200, sMin: 0, sMax: 1.4, clear: 2, tries: 40000 });
   const rockMat = new THREE.MeshLambertMaterial({ color: 0xffffff });
@@ -6418,7 +6433,7 @@ function camChase(dt, snap) {
 
 // ─── Kamera-Modi: Verfolger (Standard), Cockpit, Helikopter, Fernsehkamera ─────
 let camMode = 0, camSnapNext = true, camEff = 0;
-let cockpitHide = [];                       // Helm, Visier, Halo (Bügel + Strebe): im Cockpit-Blick ausgeblendet
+let cockpitHide = [];                       // Helm, Visier, Halo-Mittelstrebe: im Cockpit-Blick ausgeblendet
 const _cv = new THREE.Vector3(), _cq = new THREE.Quaternion(), _yAx = new THREE.Vector3(0, 1, 0);
 
 function applyCamMode() {
